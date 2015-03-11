@@ -3,6 +3,15 @@
         var numFloors = floors.length;
         var numElevators = elevators.length;
 
+        var unclaimedFloors = {
+            "-1": new Array(numFloors), // the floors with unclaimed passengers, -1 is going down, 1 is going up
+            "1" : new Array(numFloors)
+        };
+        for (var i = 0; i < numFloors; i++) {
+            unclaimedFloors[-1][i] = false;
+            unclaimedFloors[1][i] = false;
+        }
+
         function SetupElevator(elevator) {
             elevator.floorPressed = new Array(numFloors);
             for (var i = 0; i < numFloors; i++) {
@@ -107,14 +116,73 @@
                     SetupElevatorDestinations(elevator);
 
                     // people should have boarded according to indicator, so we clear the pressed signals
-                    if (floors[floorNum].upPressed && elevator.goingUpIndicator())
+                    if (floors[floorNum].upPressed && elevator.goingUpIndicator()){
                         floors[floorNum].upPressed = false;
-                    if (floors[floorNum].downPressed && elevator.goingDownIndicator())
+                        unclaimedFloors[1][floorNum] = false;
+                    }
+                    if (floors[floorNum].downPressed && elevator.goingDownIndicator()) {
                         floors[floorNum].downPressed = false;
+                        unclaimedFloors[-1][floorNum] = false;
+                    }
+
+                    ClaimUnclaimedFloors();
                 });
             })(elevator);
         };
 
+        function ClaimUnclaimedFloors() {
+            var sumUnclaimedDowns = 0, sumUnclaimedUps = 0;
+            for (var i = 0; i < numFloors; i++) {
+                sumUnclaimedUps += unclaimedFloors[1][i] ? 1 : 0;
+                sumUnclaimedDowns += unclaimedFloors[-1][i] ? 1 : 0;
+            }
+            
+            var dirsToClaim = [];
+            if (sumUnclaimedUps > 0)
+                dirsToClaim.push(1);
+            if (sumUnclaimedDowns > 0)
+                dirsToClaim.push(-1);
+            if (dirsToClaim.length == 2 && sumUnclaimedDowns > sumUnclaimedUps)
+                dirsToClaim = [-1, 1]; // just flip the order
+
+            for (var i = 0; i < dirsToClaim.length; i++)
+                TryToClaimFloorsOnDir(dirsToClaim[i]);
+        }
+
+        function TryToClaimFloorsOnDir(dir) { // TODO one issue with claiming mechanism is if another elevator somehow arrived and cleared that floor due to other passenger's request we should really clear the claim
+            var foundElevator = null;
+            for (var i = 0; i < numElevators; i++) {
+                var elevator = elevators[i];
+                if (elevator.currentDir == 0) {
+                    foundElevator = elevator;
+                    break;
+                }
+            }
+
+            if (foundElevator) { // TODO find the closest one? or use "on the way" too? Or "on the way and last"?
+                elevator.currentDir = dir;
+                if (dir == 1) {
+                    foundElevator.goingUpIndicator(true);
+                    foundElevator.goingDownIndicator(false);
+                }
+                else {
+                    foundElevator.goingUpIndicator(false);
+                    foundElevator.goingDownIndicator(true);
+                }
+
+                var firstFound = true;
+                for (var i = (dir == 1 ? 0 : numFloors - 1); i >= 0 && i < numFloors; i += dir) {
+                    if (unclaimedFloors[dir][i]) {
+                        if (firstFound)
+                            elevator.goToFloor(i); // just let the floor stopped event to handle it from there
+                        elevator.floorPressed[i] = true;
+                        unclaimedFloors[dir][i] = false;
+                        
+                        firstFound = false;
+                    }
+                }
+            }
+        }
         /*
         function TryScheduleElevator(elevator, dir, floorNum) {
             var score = 0;
@@ -133,10 +201,17 @@
             return score;
         }
         */
+        function CanScheduleElevator(elevator, dir, floorNum) {
+            var floorDir = floorNum > elevator.currentFloor() ? 1 : (floorNum < elevator.currentFloor() ? -1 : 0);
+
+            var onTheWay = (floorDir == dir && elevator.currentDir == dir);
+
+            if (elevator.currentDir == 0 || onTheWay)
+                return true;
+            return false;
+        }
         function CompareElevatorsForScheduling(elevator1, elevator2, dir, floorNum) {
             // returns true means elevator2 is better
-            var score = 0;
-
             var floorDir1 = floorNum > elevator1.currentFloor() ? 1 : (floorNum < elevator1.currentFloor() ? -1 : 0);
             var floorDir2 = floorNum > elevator2.currentFloor() ? 1 : (floorNum < elevator2.currentFloor() ? -1 : 0);
 
@@ -171,7 +246,13 @@
                     curBestElevator = elevators[i];
                 }
             }
-            ScheduleElevator(curBestElevator, dir, floorNum);
+
+            if (CanScheduleElevator(curBestElevator, dir, floorNum)) {
+                ScheduleElevator(curBestElevator, dir, floorNum);
+            }
+            else {
+                unclaimedFloors[dir][floorNum] = true;
+            }
         }
 
         function ScheduleElevator(elevator, dir, floorNum) {
