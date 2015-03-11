@@ -12,21 +12,6 @@
             elevator.currentDir = 0;
         }
 
-        function SetupElevatorDirection(elevator, dir) {
-            elevator.destinationQueue.length = 0;
-            if (dir != 0) {
-                for (var i = elevator.currentFloor() + dir; i >= 0 && i < numFloors; i += dir) {
-                    if (elevator.floorPressed[i])
-                        elevator.destinationQueue.push(i);
-                }
-            }
-            elevator.checkDestinationQueue();
-
-            elevator.currentDir = dir;
-            elevator.goingUpIndicator(dir == 1 || dir == 0);
-            elevator.goingDownIndicator(dir == -1 || dir == 0);
-        }
-
         function SetupElevatorDestinations(elevator) {
             var currentFloor = elevator.currentFloor();
             var hasUp = false, hasDown = false;
@@ -42,6 +27,41 @@
                     break;
                 }
             }
+
+            function SetupElevatorDirection(elevator, dir) {
+                elevator.destinationQueue.length = 0;
+                if (dir != 0) {
+                    for (var i = elevator.currentFloor() + dir; i >= 0 && i < numFloors; i += dir) {
+                        if (elevator.floorPressed[i])
+                            elevator.destinationQueue.push(i);
+                    }
+                }
+                elevator.checkDestinationQueue();
+
+                elevator.currentDir = dir;
+
+                elevator.goingUpIndicator(false);
+                elevator.goingDownIndicator(false);
+                if (dir == 1) {
+                    elevator.goingUpIndicator(true);
+                }
+                else if (dir == -1) {
+                    elevator.goingDownIndicator(true);
+                }
+                else {// dir == 0
+                    if (floors[currentFloor].upPressed) { // TODO use randomness to even out up vs down bias?
+                        elevator.goingUpIndicator(true);
+                    }
+                    else if (floors[currentFloor].downPressed) {
+                        elevator.goingDownIndicator(true);
+                    }
+                    else { // just wait for people to board
+                        elevator.goingUpIndicator(true);
+                        elevator.goingDownIndicator(true);
+                    }
+                }
+            }
+
 
             if (elevator.currentDir == 1 && hasUp) {
                 SetupElevatorDirection(elevator, 1);
@@ -85,7 +105,12 @@
                 elevator.on("stopped_at_floor", function(floorNum) {
                     elevator.floorPressed[floorNum] = false;
                     SetupElevatorDestinations(elevator);
-                    // TODO we may not want to turn on all directions here if turning idle, since it encourages people on both sides to board
+
+                    // people should have boarded according to indicator, so we clear the pressed signals
+                    if (floors[floorNum].upPressed && elevator.goingUpIndicator())
+                        floors[floorNum].upPressed = false;
+                    if (floors[floorNum].downPressed && elevator.goingDownIndicator())
+                        floors[floorNum].downPressed = false;
                 });
             })(elevator);
         };
@@ -129,12 +154,13 @@
             (function(curFloorNum) {
                 var curFloor = floors[curFloorNum];
                 curFloor.on('up_button_pressed', function() {
-                    //curFloor.upPressed = true; // TODO need to delay the scheduling till later if we can't do it now, since otherwise we're making unncessary stops
+                    curFloor.upPressed = true; // TODO need to delay the scheduling till later if we can't do it now, since otherwise we're making unncessary stops
 
                     ScheduleBestElevator(1, curFloorNum);
                 });
                 curFloor.on('down_button_pressed', function() {
-                    //curFloor.downPressed = true;
+                    curFloor.downPressed = true;
+
                     ScheduleBestElevator(-1, curFloorNum);
                 });
             })(curFloorNum);
